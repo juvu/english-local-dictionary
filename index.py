@@ -109,7 +109,7 @@ def readShelve(text):
             print('共 %d 条数据:' % len(result))
             # print('-' * 20)
             for i, v in enumerate(result):
-                print('  [%d] %s' % (i + 1, v['v']))
+                print(' [%d]%-15s ==> %s' % (i + 1,v['k'], v['v']))
 
         else:
             print('共 0 条数据')
@@ -137,7 +137,7 @@ if __name__ == '__main__':
 
     # 开始查询
     while True:
-        text = input('请输入英文单词：')
+        text = input('请输入英文单词(按回车键确认)：')
         print('-' * 20)
         readShelve(text)
 
