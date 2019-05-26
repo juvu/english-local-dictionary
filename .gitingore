@@ -1,7 +1,0 @@
-/.idea
-/__pycache__
-/build
-/dist
-/venv
-
-index.spec
