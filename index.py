@@ -58,12 +58,27 @@ def writeResults():
 
 # 从文件获取单词添加到队列
 def putWords2queue():
+    start_flag = 0
+    last_word = getLastWord()
+
+    # 如果为none代表从头开始
+    if not last_word:
+        start_flag = 1
+
     with open('./data/words.txt', 'r', encoding='utf-8') as f:
         for line in f:
-            # print(line.strip())
+            word = line.strip()
+
+            # 找到中断的点
+            if start_flag == 0:
+                if last_word != word:
+                    continue
+
+                start_flag = 1
+                continue
 
             q.put(line.strip())
-            # break
+
     print('单词加入搜索队列结束')
     print('*' * 20)
 
@@ -72,9 +87,7 @@ def putWords2queue():
 def productTasks():
     global theading_max_num
     # 从文件获取单词添加到队列
-    t1 = threading.Thread(target=putWords2queue)
-    time.sleep(1)
-    t1.start()
+    putWords2queue()
 
     # 搜索结果
     for i in range(theading_max_num):
@@ -104,15 +117,28 @@ def readShelve(text):
     print('*' * 20)
 
 
+# 获取shelve获取的最后一个单词
+def getLastWord():
+    with shelve.open('./data/data') as f:
+        if len(f) == 0:
+            word = None
+        else:
+            word = list(f)[-1]
+    # print(word)
+    return word
+
+
 if __name__ == '__main__':
     print('欢迎使用离线英语词典！')
-    print('*'*30)
+    print('*' * 30)
 
     # 生产者
-    # productTasks()
+    productTasks()
 
     # 开始查询
-    while True:
-        text = input('请输入英文单词：')
-        print('-' * 20)
-        readShelve(text)
+    # while True:
+    #     text = input('请输入英文单词：')
+    #     print('-' * 20)
+    #     readShelve(text)
+
+    # getLastWord()
