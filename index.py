@@ -133,12 +133,11 @@ if __name__ == '__main__':
     print('*' * 30)
 
     # 生产者
-    productTasks()
+    # productTasks()
 
     # 开始查询
-    # while True:
-    #     text = input('请输入英文单词：')
-    #     print('-' * 20)
-    #     readShelve(text)
+    while True:
+        text = input('请输入英文单词：')
+        print('-' * 20)
+        readShelve(text)
 
-    # getLastWord()
