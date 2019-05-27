@@ -7,16 +7,14 @@ import queue
 import shelve
 
 q = queue.Queue()
-
 q_write = queue.Queue()
+q_stop = queue.Queue()
 
-theading_max_num = 50
-theading_now_num = 0
+theading_max_num = 30
 
 
 # 根据单词搜索结果
 def searchWord():
-    global theading_now_num
     headers = {
         'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 10_3_1 like Mac OS X) AppleWebKit/603.1.30 (KHTML, like Gecko) Version/10.0 Mobile/14E304 Safari/602.1',
         'Referer': 'https://fanyi.baidu.com/'
@@ -34,29 +32,11 @@ def searchWord():
         except Exception as e:
             print(e)
 
-    theading_now_num += 1
+    q_stop.put(1)
     print('退出线程')
 
 
-# 从结果队列读取数据写入文本
-def writeResults():
-    global theading_now_num
-    global theading_max_num
-
-    with shelve.open('./data/data') as f:
-        while theading_now_num < theading_max_num:
-            text = q_write.get()
-            try:
-                key = text[0]['k']
-                f[key] = text
-                print('写入了%s' % key)
-            except Exception as e:
-                print(e)
-
-    print('写入文本结束')
-
-
-# 从文件获取单词添加到队列
+# 添加单词到队列
 def putWords2queue():
     start_flag = 0
     last_word = getLastWord()
@@ -68,7 +48,6 @@ def putWords2queue():
     with open('./data/words.txt', 'r', encoding='utf-8') as f:
         for line in f:
             word = line.strip()
-
             # 找到中断的点
             if start_flag == 0:
                 if last_word != word:
@@ -81,6 +60,26 @@ def putWords2queue():
 
     print('单词加入搜索队列结束')
     print('*' * 20)
+
+
+# 从结果队列读取数据写入shelve
+def writeResults():
+    global theading_max_num
+
+    with shelve.open('./data/data') as f:
+        while q_stop.qsize() < theading_max_num or not q_write.empty():
+            try:
+                text = q_write.get(timeout=5)
+                key = text[0]['k']
+                f[key] = text
+                print('写入了%s' % key)
+            except queue.Empty:
+                break
+            except Exception as e:
+                print(e)
+                continue
+
+    print('写入文本结束')
 
 
 # 发布任务
@@ -100,21 +99,19 @@ def productTasks():
     t2.join()
 
 
-# 根据单词搜索结果
+# 根据单词搜索
 def readShelve(text):
-    # print('查询 %s 结果:' % text)
-    with shelve.open('./data/data') as f:
+    with shelve.open('./data/data', 'r') as f:
         if text in f:
-            result = f.get(text)
-            print('共 %d 条数据:' % len(result))
-            # print('-' * 20)
-            for i, v in enumerate(result):
-                print(' [%d]%-15s ==> %s' % (i + 1,v['k'], v['v']))
+            try:
+                result = f.get(text)
+            except:
+                print('该单词查询出错！')
+                result = []
+            return result
 
         else:
-            print('共 0 条数据')
-
-    print('*' * 20)
+            return []
 
 
 # 获取shelve获取的最后一个单词
@@ -124,12 +121,20 @@ def getLastWord():
             word = None
         else:
             word = list(f)[-1]
-    # print(word)
     return word
 
 
 if __name__ == '__main__':
-    print('欢迎使用离线英语词典！')
+    print(r"""                  _ _     _      
+                 | (_)   | |     
+   ___ _ __   _ _| |_ ___| |__   
+ / _ \ '_ \ / _` | | / __| '_ \  
+|  __/ | | | (_| | | \__ \ | | | 
+ \___|_| |_|\__, |_|_|___/_| |_| 
+             __/ |               
+            |___/                
+ """)
+
     print('*' * 30)
 
     # 生产者
@@ -137,7 +142,38 @@ if __name__ == '__main__':
 
     # 开始查询
     while True:
-        text = input('请输入英文单词(按回车键确认)：')
-        print('-' * 20)
-        readShelve(text)
+        text0 = input('请输入英文单词(按回车键确认)：')  # 原字符串
 
+        # 讲输入单词变换大小写
+        if text0.islower():
+            text_list = [text0.capitalize(), text0.upper()]
+        elif text0.isupper():
+            text_list = [text0.lower(), text0.capitalize()]
+        else:
+            text_list = [text0.lower(), text0.upper()]
+
+        print('-' * 30)
+
+        # 查询原本单词
+        res = readShelve(text0)
+        if len(res) > 0:
+            print('共 %d 条数据:' % len(res))
+            for i, v in enumerate(res):
+                print('[%d] %-15s  ==> %s\n' % (i + 1, v['k'], v['v']))
+            print('*' * 30)
+            continue
+
+        # 查询变形单词
+        for i in text_list:
+            res = readShelve(i)
+            if len(res) > 0:
+                print('共 %d 条数据:' % len(res))
+                for i, v in enumerate(res):
+                    print('[%d] %-15s  ==> %s\n' % (i + 1, v['k'], v['v']))
+                print('*' * 30)
+                break
+
+        else:
+
+            print('搜索不到该单词！')
+            print('*' * 30)
