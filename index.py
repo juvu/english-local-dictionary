@@ -1,6 +1,13 @@
 #! usr/bin/python3
 # -*- coding: utf-8 -*-
+
+__version__ = 'v0.4'
+__author__ = 'seast19<sun@orzx.cn>'
+
+
+import os
 import sys
+import re
 import time
 import json
 
@@ -13,11 +20,10 @@ class EnglishDict:
     def __init__(self):
         self.__q = queue.Queue()  # 将词库添加到此队列
         self.__q_write = queue.Queue()  # 将搜索结果添加到此
-        # self.q_stop = queue.Queue()
 
         self.__data_a = {}  # 整理后最终要保存的内容
 
-        self.theading_num = 5  # 爬取翻译线程数
+        self.theading_num = 50  # 爬取翻译线程数
 
     def __put_words_to_queue(self):
         """添加单词到待搜索队列
@@ -86,7 +92,7 @@ class EnglishDict:
         # self.q_stop.put(1)
         print('退出线程')
 
-    def __write_results(self):
+    def __write_file(self):
         """从结果队列读取数据写入json
 
         :return:
@@ -108,18 +114,19 @@ class EnglishDict:
                 continue
 
         # 将临时字典写入json文件
-        print('开始写入json文件')
-        # print(self.__data_a)
-        # self.__data_a.update({'oook':[{'v':'11','v':'22'}]})
+        print('*' * 30)
+        print('开始写入json文件...')
         with open('data/data.json', 'w+', encoding='utf-8') as f:
             json.dump(self.__data_a, f)
-        print('写入json文件结束')
+        print('写入j结束')
 
     def product_tasks(self):
         """发布任务
 
         :return:
         """
+
+        start_time1 = time.time()  # 开始时间
 
         # 从文件获取单词添加到队列
         self.__put_words_to_queue()
@@ -130,57 +137,84 @@ class EnglishDict:
             t.start()
 
         # 读取结果
-        t2 = threading.Thread(target=self.__write_results)
+        t2 = threading.Thread(target=self.__write_file)
         t2.start()
-        t2.join()
+        t2.join()  # 阻塞此线程
 
-    def start_search(self):
+        print('耗时：%d分%.2f秒', ((time.time() - start_time1) // 60, (time.time() - start_time1) % 60))
+
+    def user_search(self):
         """用户输入单词进行查询
 
         :return:
         """
 
+        # 加载词库
         print('加载词库中...')
         try:
             with open('data/data.json', 'r', encoding='utf-8') as f:
                 f2 = json.load(f)
-
                 print('加载成功!')
-                print('*' * 30)
+                print('+============================+')
 
-                # 循环搜索单词
-                while True:
-                    word = str(input('请输入英文单词(按回车键确认)：'))  # 原字符串
-                    start_time = time.time()  # 计时开始
-
-                    # 将输入单词变换大小写
-                    text_list = [word, word.lower(), word.upper(), word.capitalize()]
-
-                    # 查询变形单词
-                    for i in text_list:
-                        if i in f2:
-                            try:
-                                res = f2.get(i)
-                            except:
-                                print('%s  -->该单词查询出错！' % i)
-                                res = []
-                        else:
-                            res = []
-
-                        if len(res) > 0:
-                            print('共 %d 条数据: %fs' % (len(res), (time.time() - start_time)))
-                            # 显示条目下的信息
-                            for j, v in enumerate(res):
-                                print('[%d] %-15s  ==> %s\n' % (j + 1, v['k'], v['v']))
-                            print('*' * 30)
-                            break
-                    else:
-                        print('搜索不到该单词！')
-                        print('*' * 30)
-
-        except (FileNotFoundError, json.decoder.JSONDecodeError):
-            print('无数据文件或文件不正确!')
+        except FileNotFoundError:
+            print('无数据文件!')
             input('按回车键退出...')
+            return
+        except json.decoder.JSONDecodeError:
+            print('数据文件不正确或已损坏!')
+            input('按回车键退出...')
+            return
+
+        # 循环搜索单词
+        while True:
+            word = input('请输入单词(按回车键确认)：').strip()  # 用户输入字符串
+
+            # 字符串非空检测
+            if word == '':
+                print('输入内容不能为空！')
+                print('+----------------------------+')
+                continue
+
+            start_time = time.time()  # 计时开始
+            results_list = []  # 临时保存结果
+
+            # 将输入单词变换大小写，中文则原型
+            word_list = {word, word.lower(), word.upper(), word.capitalize()}
+
+            # 查询变形单词(英语单词)
+            for i in word_list:
+                # 查询单词
+                if i in f2:
+                    try:
+                        results_list = f2[i]
+                        break
+                    except KeyError as e:
+                        print(e)
+                        print('%s  -->该单词查询出错！' % i)
+                        continue
+
+            # 找不到英语单词，则从结果反向查找(汉语)
+            else:
+                reg_exp = '[;: ]' + word + '[;: ]'  # 创建正则表达式
+
+                # 查找翻译内容是否有匹配项
+                for k, v in f2.items():
+                    value = v[0]['v']
+                    res = re.findall(reg_exp, value)
+                    if res:
+                        results_list.append(v[0])  # 添加匹配条目的第一条数据，后面条目数据为此key变形，无需记录
+
+            # 输出搜索结果
+            if results_list:
+                print('共 %d 条数据: %.3fs\n' % (len(results_list), (time.time() - start_time)))
+                for i, v in enumerate(results_list):
+                    print('[%d] %-15s  ==> %s\n' % (i + 1, v['k'], v['v']))
+
+            else:
+                print('无搜索结果!')
+
+            print('+----------------------------+')
 
 
 if __name__ == '__main__':
@@ -193,10 +227,13 @@ if __name__ == '__main__':
  \___|_| |_|\__, |_|_|___/_| |_| 
              __/ |               
             |___/                
-******************************""")
+          
+          汉英互译词典
++============================+""")
 
     eng = EnglishDict()
 
+    # 输入参数确定运行方式
     if len(sys.argv) > 1:
         flag1 = sys.argv[1]
         if flag1 == '-s':
@@ -206,10 +243,4 @@ if __name__ == '__main__':
             print('参数错误!  [-s]:开始爬取词库翻译')
     else:
         # 用户查询
-        eng.start_search()
-
-    # 生产者
-    # eng.product_tasks()
-
-    # 用户查询
-    # eng.start_search()
+        eng.user_search()
