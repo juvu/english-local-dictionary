@@ -9,6 +9,8 @@
 * 支持`英语->汉语`，`汉语->英语`
 * 限制于百度翻译，部分生僻单词无法搜索到
 
+* 使用go语言重写，停止维护原python版本
+
 
 ***
 
@@ -23,19 +25,12 @@
     
     - linux:
     
-        安装依赖后运行`index.py`
         ```    
-        sudo pip install -r requirements.txt
-        python3 index.py
+        go run index.go
         ```
         
 
-* 自行爬取翻译
 
-    ```
-    python3 index.py -s
-    ```
-    爬取到的json文件将保存在`data/data.json`文件
   
    
     
