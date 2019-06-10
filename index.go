@@ -30,8 +30,11 @@ type English struct {
 	lock          sync.Mutex           //对data的锁
 }
 
+//工厂模式
 //初始化数据
-func (c *English) init() {
+func NewStruct() *English {
+	c := &English{}
+
 	c.treadingNub = 40
 	c.q = make(chan string, 2000)
 	c.qWrite = make(chan []SubItem, 200)
@@ -39,23 +42,22 @@ func (c *English) init() {
 	c.qSaveFileDown = make(chan int)
 	c.data = make(map[string][]SubItem)
 
-	//加载json文件,加载失败则设置data为空
-	err := c.loadJsonFile()
-	if err != nil {
-		fmt.Println("设置为空字典")
-	}
+	//加载json文件,若有内容则设置c.data
+	_ = c.loadJsonFile()
+
+	return c
 
 }
 
 //添加词库到队列
-func (c *English) putWords() error {
-
+func (c *English) putWords() {
 	//打开词库文件
 	f, err := os.Open("data/words.txt")
 	if err != nil {
 		fmt.Println("打开words文件失败")
 		fmt.Println(err)
-		return err
+		close(c.q)
+		return
 	}
 	defer f.Close()
 
@@ -85,7 +87,7 @@ func (c *English) putWords() error {
 	}
 	fmt.Println("添加词库到管道完毕")
 	fmt.Println("+==============================+")
-	return nil
+	return
 }
 
 //从百度翻译获取结果
@@ -179,7 +181,7 @@ func (c *English) writeFile() {
 //生产者
 func (c *English) StartSearch() {
 	//初始化参数
-	c.init()
+	//c.init()
 	//添加单词进管道
 	go c.putWords()
 	//多线程爬虫
@@ -226,10 +228,11 @@ func (c *English) loadJsonFile() error {
 
 //用户搜索
 func (c *English) UserSearch() {
-	//加载文件内容
-	err := c.loadJsonFile()
-	if err != nil {
-		fmt.Println(err)
+	//检测json问价是否载入
+	if len(c.data) == 0 {
+		temp := 1
+		fmt.Println("按回车键退出...")
+		_, _ = fmt.Scanln(&temp)
 		return
 	}
 
@@ -305,16 +308,11 @@ func main() {
            汉英互译词典
 +==============================+`)
 
-	eng := English{}
+	eng := NewStruct()
 	//开始爬取
 	//eng.StartSearch()
 
 	//用户搜索
 	eng.UserSearch()
-
-	//按回车键退出
-	//a := 1
-	//fmt.Printf("\n按回车键退出...")
-	//fmt.Scanln(&a)
 
 }
