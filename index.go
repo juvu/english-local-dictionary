@@ -15,31 +15,34 @@ import (
 	"time"
 )
 
+//搜索结果反序列化
 type SubItem struct {
 	K string `json:"k"`
 	V string `json:"v"`
 }
 
+//主结构体
 type English struct {
-	treadingNub   int                  //线程数
-	q             chan string          //词库队列
-	qWrite        chan []SubItem       //搜索结果队列
-	qSearchDown   chan int             //线程结束
-	qSaveFileDown chan int             //线程结束
+	treadingNub int            //线程数
+	qWords      chan string    //词库队列
+	qResults    chan []SubItem //搜索结果队列
+
+	qSearchDone   chan int             //搜索线程结束
+	qSaveFileDone chan int             //写文件线程结束
 	data          map[string][]SubItem //最终数据
 	lock          sync.Mutex           //对data的锁
 }
 
-//工厂模式
-//初始化数据
+//工厂模式,初始化数据
 func NewStruct() *English {
 	c := &English{}
 
-	c.treadingNub = 40
-	c.q = make(chan string, 2000)
-	c.qWrite = make(chan []SubItem, 200)
-	c.qSearchDown = make(chan int)
-	c.qSaveFileDown = make(chan int)
+	c.treadingNub = 40 //爬虫线程数
+	c.qWords = make(chan string, 2000)
+	c.qResults = make(chan []SubItem, 200)
+
+	c.qSearchDone = make(chan int, c.treadingNub)
+	c.qSaveFileDone = make(chan int, 1)
 	c.data = make(map[string][]SubItem)
 
 	//加载json文件,若有内容则设置c.data
@@ -49,14 +52,14 @@ func NewStruct() *English {
 
 }
 
-//添加词库到队列
+//添加单词到管道
 func (c *English) putWords() {
 	//打开词库文件
 	f, err := os.Open("data/words.txt")
 	if err != nil {
 		fmt.Println("打开words文件失败")
 		fmt.Println(err)
-		close(c.q)
+		close(c.qWords)
 		return
 	}
 	defer f.Close()
@@ -68,7 +71,7 @@ func (c *English) putWords() {
 		//按行读取
 		line, err := rd.ReadString('\n')
 		if err != nil || err == io.EOF {
-			close(c.q)
+			close(c.qWords)
 			break
 		}
 		//去除空白
@@ -78,10 +81,7 @@ func (c *English) putWords() {
 		_, ok := c.data[lineTrim]
 		c.lock.Unlock()
 		if !ok {
-			c.q <- lineTrim
-
-		} else {
-			//fmt.Println("跳过", lineTrim)
+			c.qWords <- lineTrim
 		}
 
 	}
@@ -90,16 +90,16 @@ func (c *English) putWords() {
 	return
 }
 
-//从百度翻译获取结果
+//从百度翻译获取单项搜索结果
 func (c *English) searchWord() {
 	client := &http.Client{}
-
+	//headers
 	headers := http.Header{}
 	headers.Set("Content-Type", "application/x-www-form-urlencoded") //重要！无此项导致无法获取正确响应
 	headers.Add("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 10_3_1 like Mac OS X) AppleWebKit/603.1.30 (KHTML, like Gecko) Version/10.0 Mobile/14E304 Safari/602.1")
 	headers.Add("Referer", "https://fanyi.baidu.com/")
 
-	for word := range c.q {
+	for word := range c.qWords {
 		//添加data
 		data := url.Values{}
 		data.Set("kw", word)
@@ -135,37 +135,36 @@ func (c *English) searchWord() {
 		//添加到管道
 		if len(resultStruct.Data) > 0 {
 			fmt.Println("添加了：", word)
-			c.qWrite <- resultStruct.Data
+			c.qResults <- resultStruct.Data
 		} else {
 			fmt.Println("跳过：", word)
 		}
 
 	}
 	//该线程结束则给出标记
-	c.qSearchDown <- 1
+	c.qSearchDone <- 1
 	fmt.Println("退出线程")
 
 }
 
-//写入文件
-func (c *English) writeFile() {
-
+//保存为json文件
+func (c *English) saveFile() {
 	//将结果放入data
-	for item := range c.qWrite {
+	for item := range c.qResults {
 		key := item[0].K
 		c.lock.Lock()
 		c.data[key] = item
 		c.lock.Unlock()
 	}
-	//写入json文件
 	fmt.Println("开始写入文件")
+	//反序列化map
 	jsonData, err := json.Marshal(c.data)
 	if err != nil {
 		fmt.Println("序列化json失败")
 		fmt.Println(err)
 		return
 	}
-
+	//保存文件
 	err = ioutil.WriteFile("data/data.json", jsonData, 0666)
 	if err != nil {
 		fmt.Println("保存为文件失败")
@@ -174,32 +173,31 @@ func (c *English) writeFile() {
 	}
 
 	fmt.Println("写入文件成功")
-	c.qSaveFileDown <- 1
+	c.qSaveFileDone <- 1
 
 }
 
 //生产者
-func (c *English) StartSearch() {
-	//初始化参数
-	//c.init()
+func (c *English) StartSpider() {
 	//添加单词进管道
 	go c.putWords()
+
 	//多线程爬虫
 	for i := 0; i < c.treadingNub; i++ {
 		go c.searchWord()
 	}
 
 	//写入文件
-	go c.writeFile()
+	go c.saveFile()
 
-	//等待爬取完毕后关闭c.qWrite
+	//等待爬取完毕后关闭c.qResults
 	for i := 0; i < c.treadingNub; i++ {
-		<-c.qSearchDown
+		<-c.qSearchDone
 	}
-	fmt.Println("关闭qwrite")
-	close(c.qWrite)
+	fmt.Println("所有搜索线程结束")
+	close(c.qResults)
 
-	<-c.qSaveFileDown
+	<-c.qSaveFileDone
 
 }
 
@@ -228,7 +226,7 @@ func (c *English) loadJsonFile() error {
 
 //用户搜索
 func (c *English) UserSearch() {
-	//检测json问价是否载入
+	//检测json文件是否载入
 	if len(c.data) == 0 {
 		temp := 1
 		fmt.Println("按回车键退出...")
@@ -249,7 +247,7 @@ func (c *English) UserSearch() {
 			continue
 		}
 		//开始时间
-		startTime := time.Now().UnixNano()
+		startTime := time.Now()
 		//去除空白
 		word = strings.TrimSpace(word)
 		//单词变为大小写
@@ -279,15 +277,14 @@ func (c *English) UserSearch() {
 		}
 
 		//显示结果
-		stopTime := float64(time.Now().UnixNano()-startTime) / 1000000000.0 //结束时间
+		lastTime := time.Since(startTime) //持续搜索时间
 		if len(resultList) > 0 {
-			//fmt.Println(stopTime)
-			fmt.Printf("共 %d 条数据: %.3fs\n\n", len(resultList), stopTime)
+			fmt.Printf("共 %d 条数据: %.3fs\n\n", len(resultList), lastTime.Seconds())
 			for i3, v3 := range resultList {
 				fmt.Printf("[%d] %-15s  ==> %s\n\n", i3+1, v3.K, v3.V)
 			}
 		} else {
-			fmt.Printf("无搜索结果 %.3fs\n\n", stopTime)
+			fmt.Printf("无搜索结果 %.3fs\n\n", lastTime.Seconds())
 		}
 
 		fmt.Println("+------------------------------+")
@@ -309,8 +306,9 @@ func main() {
 +==============================+`)
 
 	eng := NewStruct()
+
 	//开始爬取
-	//eng.StartSearch()
+	//eng.StartSpider()
 
 	//用户搜索
 	eng.UserSearch()
